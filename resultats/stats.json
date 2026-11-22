@@ -1,0 +1,18 @@
+{
+  "types_perimetre": {
+    "Master indifférencié (recherche et professionnel)": 5933,
+    "Master professionnel": 506,
+    "Master recherche": 278,
+    "Master of Science (MSc)": 329,
+    "Mastère spécialisé": 349,
+    "Mastère en sciences (MSc)": 63,
+    "MBA": 79,
+    "Diplôme d'école de commerce visé de niveau bac + 4 ou 5": 238
+  },
+  "formations_perimetre_types": 7775,
+  "formations_management": 349,
+  "sans_domaine_lu": 6802,
+  "details_erreurs": [
+    "35747/14115"
+  ]
+}
