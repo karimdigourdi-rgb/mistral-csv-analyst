@@ -201,37 +201,43 @@ def main() -> int:
         print(f"filters: échec ({error!r}) — poursuivi sans", flush=True)
     portal.refresh_token()
 
-    # 1) Liste paginée complète, avec reprise.
+    # 1) Liste paginée complète, avec reprise et saut si déjà complète.
     part = OUT / "list.partial.json"
-    if part.exists():
-        state = json.loads(part.read_text(encoding="utf-8"))
+    final_list = OUT / "list.json"
+    if final_list.exists():
+        items = json.loads(final_list.read_text(encoding="utf-8"))["items"]
+        print(f"list: déjà complète en cache ({len(items)} items) — sautée", flush=True)
     else:
-        state = {"page": 1, "items": [], "nb_pages": 0}
-    page, items = state["page"], state["items"]
-    nb_pages = state["nb_pages"]
-    print(f"list: reprise à la page {page} ({len(items)} items en cache)", flush=True)
-    while True:
-        try:
-            data = portal.list_page(page)
-        except RuntimeError as error:
+        if part.exists():
+            state = json.loads(part.read_text(encoding="utf-8"))
+        else:
+            state = {"page": 0, "items": [], "nb_pages": 0}
+        page, items = state["page"], state["items"]
+        nb_pages = state["nb_pages"]
+        print(f"list: reprise à la page {page} ({len(items)} items en cache)", flush=True)
+        while True:
+            try:
+                data = portal.list_page(page)
+            except RuntimeError as error:
+                (OUT / "list.partial.json").write_text(
+                    json.dumps({"page": page, "items": items, "nb_pages": nb_pages}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                print(f"ERREUR liste: {error} — état sauvegardé, relancez le job pour reprendre.", flush=True)
+                return 1
+            items.extend(data.get("donnees") or [])
+            pagination = data.get("pagination") or {}
+            nb_pages = int(pagination.get("nbPages") or nb_pages)
             (OUT / "list.partial.json").write_text(
-                json.dumps({"page": page, "items": items, "nb_pages": nb_pages}, ensure_ascii=False),
+                json.dumps({"page": page + 1, "items": items, "nb_pages": nb_pages}, ensure_ascii=False),
                 encoding="utf-8",
             )
-            print(f"ERREUR liste: {error} — état sauvegardé, relancez le job pour reprendre.", flush=True)
-            return 1
-        items.extend(data.get("donnees") or [])
-        nb_pages = int((data.get("pagination") or {}).get("nbPages") or nb_pages)
-        (OUT / "list.partial.json").write_text(
-            json.dumps({"page": page + 1, "items": items, "nb_pages": nb_pages}, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        print(f"list page {page}/{nb_pages} (total items {len(items)})", flush=True)
-        if page >= nb_pages:
-            break
-        page += 1
-        time.sleep(LIST_DELAY)
-    (OUT / "list.json").write_text(
+            print(f"list page {page}/{nb_pages} (items cumulés {len(items)}, nbResultats {pagination.get('nbResultats')})", flush=True)
+            if page + 1 >= nb_pages:
+                break
+            page += 1
+            time.sleep(LIST_DELAY)
+    final_list.write_text(
         json.dumps({"fetched": dt.date.today().isoformat(), "items": items}, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -312,6 +318,19 @@ def main() -> int:
         if line.strip():
             record = json.loads(line)
             detail_cache[record["k"]] = record["d"]
+
+    # Merge des items de liste: si la phase liste a chargé plusieurs fois une page, dédoublonne par clé.
+    deduped = []
+    ids_seen = set()
+    for item in items:
+        if not isinstance(item, dict) or item.get("idFormation") is None:
+            continue
+        key = f"{item['idFormation']}/{item['idSite']}"
+        if key in ids_seen:
+            continue
+        ids_seen.add(key)
+        deduped.append(item)
+    items = deduped
 
     # 4) Fusion.
     rows = []
