@@ -26,7 +26,19 @@ class ListExtractInput(BaseModel):
     page_size: int = Field(default=100, ge=1, le=100)
     start_page: int = 1
     max_pages: int = Field(default=0, description="Nombre maximal de pages à parcourir ; 0 = toutes.")
-    type_diplomes: list[str] = Field(default_factory=list, description="Filtrage sur 'typeDiplome' (libellés exacts).")
+    type_diplomes: list[str] = Field(
+        default_factory=lambda: [
+            "Master indifférencié (recherche et professionnel)",
+            "Master professionnel",
+            "Master recherche",
+            "Master of Science (MSc)",
+            "Mastère spécialisé",
+            "Mastère en sciences (MSc)",
+            "MBA",
+            "Diplôme d'école de commerce visé de niveau bac + 4 ou 5",
+        ],
+        description="Filtrage sur 'typeDiplome' (libellés exacts).",
+    )
     libelle_contains: list[str] = Field(default_factory=list, description="Filtrage complémentaire sur 'libelleFormation'.")
     delay_seconds: float = 1.0
 
