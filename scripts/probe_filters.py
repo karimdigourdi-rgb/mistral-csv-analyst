@@ -26,15 +26,25 @@ CANDIDATE_KEYS = [
 TYPE_IDS = [56, 75, 84, 97, 69, 76, 91, 66]
 
 
-def post_json(portal: Portal, body: dict) -> dict:
-    request = urllib.request.Request(
-        API,
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-        headers={**HEADERS, "Content-Type": "application/json", "X-XSRF-TOKEN": portal.token},
-    )
-    raw = portal.opener.open(request, timeout=60).read().decode("utf-8")
-    return json.loads(raw)
+def post_json(portal: Portal, body: dict, max_attempts: int = 3) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            request = urllib.request.Request(
+                API,
+                data=json.dumps(body).encode("utf-8"),
+                method="POST",
+                headers={**HEADERS, "Content-Type": "application/json", "X-XSRF-TOKEN": portal.token},
+            )
+            raw = portal.opener.open(request, timeout=60).read().decode("utf-8")
+            if raw.lstrip().startswith("{"):
+                return json.loads(raw)
+            last_error = RuntimeError("réponse hors JSON (maintenance)")
+        except Exception as error:  # noqa: BLE001
+            last_error = error
+        portal.refresh_token()
+        time.sleep(10 + attempt * 20)
+    raise last_error  # type: ignore[misc]
 
 
 def total_of(pagination: dict) -> object:
@@ -46,6 +56,7 @@ def total_of(pagination: dict) -> object:
 
 def main() -> int:
     portal = Portal()
+    portal.refresh_token()
 
     raw = portal.opener.open(
         urllib.request.Request(API + "/filters/formations", headers=HEADERS), timeout=30
@@ -62,7 +73,11 @@ def main() -> int:
             if not isinstance(entries, list):
                 continue
             for entry in entries:
-                if isinstance(entry, dict) and "management" in str(entry.get("libelle", "")).lower():
+                if not isinstance(entry, dict):
+                    continue
+                if group_key == "typesFormations":
+                    print("TYPE:", entry.get("id"), "=", entry.get("libelle"))
+                if "management" in str(entry.get("libelle", "")).lower():
                     management[group_key] = entry
                     print("MATCH:", group_key, "=", json.dumps(entry, ensure_ascii=False))
                     for sub_key in ("sousDomaines", "sousDomains", "children", "sous_domaines"):
