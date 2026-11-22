@@ -134,6 +134,12 @@ def clean_text(value: object) -> str:
     return " ".join(html_module.unescape(value).split())
 
 
+def rich_text(value: object) -> str:
+    if isinstance(value, dict) and value.get("value") is not None:
+        value = value["value"]
+    return clean_text(value)
+
+
 def detail_row(item: dict, detail: dict) -> dict:
     key = f"{item['idFormation']}/{item['idSite']}"
     ok = "formationInformationGenerale" in detail and "__error" not in detail
@@ -147,7 +153,8 @@ def detail_row(item: dict, detail: dict) -> dict:
             continue
         if not entree.get("ferme"):
             if entree.get("coutFormation"):
-                frais.append((entree.get("annee") or "", entree.get("coutFormation")))
+                annee = ("annee {}".format(entree.get("annee")) if entree.get("annee") else "annee ?")
+                frais.append((annee, entree.get("coutFormation")))
             if entree.get("dateFin"):
                 d = entree["dateFin"]
                 date_limite = d if date_limite is None or d > date_limite else date_limite
@@ -170,8 +177,13 @@ def detail_row(item: dict, detail: dict) -> dict:
         "domaine": clean_text(general.get("domaine")) if ok else "",
         "sous_domaine": clean_text(general.get("sousDomaine")) if ok else "",
         "langue_enseignement": clean_text(general.get("langueEnseignement")) if ok else "",
-        "pre_requis": clean_text(general.get("preRequis")) if ok else "",
-        "frais_formation": " | ".join(f"{a}: {c}" for a, c in frais) if frais else "",
+        "pre_requis": rich_text(general.get("preRequis")) if ok else "",
+        "description": rich_text(general.get("descriptionFormation")) if ok else "",
+        "frais_formation": " | ".join(
+            "{} : {} €.".format(a, "{:.2f}".format(float(c)).rstrip("0").rstrip("."))
+            if isinstance(c, (int, float)) else "{} : {}".format(a, c)
+            for a, c in frais
+        ) if frais else "",
         "date_limite_candidature": date_limite or "",
         "admission_parallele": bool(item.get("procedureParallele")) or any(
             e.get("procedureParallele") for e in entrees if isinstance(e, dict)
@@ -267,7 +279,10 @@ def main() -> int:
         for line in detail_file.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
-            record = json.loads(line)
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
             detail_cache[record["k"]] = record["d"]
     todo = [
         item for item in keep_items
@@ -315,9 +330,13 @@ def main() -> int:
             return 1
 
     for line in detail_file.read_text(encoding="utf-8").splitlines():
-        if line.strip():
+        if not line.strip():
+            continue
+        try:
             record = json.loads(line)
-            detail_cache[record["k"]] = record["d"]
+        except json.JSONDecodeError:
+            continue
+        detail_cache[record["k"]] = record["d"]
 
     # Merge des items de liste: si la phase liste a chargé plusieurs fois une page, dédoublonne par clé.
     deduped = []
@@ -349,7 +368,7 @@ def main() -> int:
     columns = list(in_scope[0].keys()) if in_scope else [
         "id_formation", "id_site", "url_fiche", "type_de_diplome", "formation", "etablissement",
         "groupement", "site", "catalogue", "niveau", "domaine", "sous_domaine", "langue_enseignement",
-        "pre_requis", "frais_formation", "date_limite_candidature", "admission_parallele",
+        "pre_requis", "description", "frais_formation", "date_limite_candidature", "admission_parallele",
         "email_contact", "adresse", "site_web", "detail_ok",
     ]
     with (OUT / "formations_management_master.csv").open("w", encoding="utf-8-sig", newline="") as handle:
