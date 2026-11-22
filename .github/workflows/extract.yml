@@ -9,18 +9,30 @@ permissions:
 jobs:
   extract:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 170
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Extraction du catalogue (liste + détails)
+      - name: Restauration du cache d'avancement (reprise)
+        uses: actions/cache/restore@v4
+        with:
+          path: resultats
+          key: efr-details-${{ github.run_id }}
+          restore-keys: efr-details-
+      - name: Extraction du catalogue (liste + détails, reprise depuis le cache)
         run: python scripts/extract_catalogue.py
-      - name: Publication de l'artefact
+      - name: Publication de l'artefact (même en cas d'arrêt)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: formations-management-master
+          name: resultats-${{ github.run_id }}
           path: resultats/
           if-no-files-found: error
-          retention-days: 30
+      - name: Sauvegarde du cache d'avancement
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: resultats
+          key: efr-details-${{ github.run_id }}

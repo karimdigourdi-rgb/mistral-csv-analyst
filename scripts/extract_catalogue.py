@@ -58,9 +58,12 @@ TYPE_DIPLOMES = [
 DOMAIN = "management, gestion, finances et commerce"
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; efr-catalogue-extract/1.0)", "Accept": "application/json"}
-DETAIL_THREADS = 4
-DETAIL_DELAY = 0.25
+DETAIL_THREADS = 3
+DETAIL_DELAY = 0.3
 LIST_DELAY = 1.0
+DETAIL_PAUSE_EVERY = 200
+DETAIL_PAUSE_SECONDS = 20
+FAIL_STREAK_BREAKER = 40
 
 LOCK = threading.Lock()
 
@@ -103,7 +106,7 @@ class Portal:
             time.sleep(min(20 + attempt * 20, 180))
         raise RuntimeError(f"list page {page} failed: {last_error}")
 
-    def detail(self, id_formation: str, id_site: str, max_attempts: int = 8) -> dict:
+    def detail(self, id_formation: str, id_site: str, max_attempts: int = 4) -> dict:
         url = f"{API}/{id_formation}/site/{id_site}"
         last_error = "?"
         for attempt in range(max_attempts):
@@ -119,7 +122,7 @@ class Portal:
                 last_error = str(error.code)
             except Exception as error:  # noqa: BLE001
                 last_error = type(error).__name__
-            time.sleep(min(20 + attempt * 20, 180))
+            time.sleep(min(20 + attempt * 20, 60))
         return {"__error": last_error}
 
 
@@ -269,20 +272,41 @@ def main() -> int:
     index = {"n": 0}
 
     with detail_file.open("a", encoding="utf-8") as handle, cf.ThreadPoolExecutor(DETAIL_THREADS) as pool:
+        state = {"done": 0, "streak": 0, "aborted": False}
+
         def work(pair: tuple[str, str]) -> tuple[str, dict]:
+            if state["aborted"]:
+                return f"{pair[0]}/{pair[1]}", {"__skip": 1}
             id_formation, id_site = pair
             result = portal.detail(id_formation, id_site)
             time.sleep(DETAIL_DELAY)
+            errored = "__error" in result
             with LOCK:
-                index["n"] += 1
-                if index["n"] % 250 == 0:
-                    print(f"details {index['n']}/{len(keys_todo)}", flush=True)
+                state["done"] += 1
+                state["streak"] = state["streak"] + 1 if errored else 0
+                done = state["done"]
+                streak = state["streak"]
+                if not state["aborted"] and streak >= FAIL_STREAK_BREAKER:
+                    state["aborted"] = True
+                if done % 250 == 0:
+                    print(f"details {done}/{len(keys_todo)} (streak erreurs {streak})", flush=True)
+            time.sleep(0)
+            if done % DETAIL_PAUSE_EVERY == 0:
+                time.sleep(DETAIL_PAUSE_SECONDS)
             return f"{id_formation}/{id_site}", result
 
-        for record_n, (key, detail_data) in enumerate(pool.map(work, keys_todo)):
+        n = 0
+        for key, detail_data in pool.map(work, keys_todo):
             handle.write(json.dumps({"k": key, "d": detail_data}, ensure_ascii=False) + "\n")
-            if record_n % 500 == 0:
+            if n % 500 == 0:
                 handle.flush()
+            n += 1
+        if state["aborted"]:
+            (OUT / "list.partial.json").write_text(
+                json.dumps({"page": 1, "items": [], "nb_pages": 0}, ensure_ascii=False), encoding="utf-8"
+            )  # rien à reprendre côté liste : le cache détail suffira
+            print("BREAKER: trop d'erreurs consécutives — cache détail sauvegardé, relancez le job pour reprendre.", flush=True)
+            return 1
 
     for line in detail_file.read_text(encoding="utf-8").splitlines():
         if line.strip():
