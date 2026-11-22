@@ -211,7 +211,7 @@ def main() -> int:
         if part.exists():
             state = json.loads(part.read_text(encoding="utf-8"))
         else:
-            state = {"page": 0, "items": [], "nb_pages": 0}
+            state = {"page": 1, "items": [], "nb_pages": 0}
         page, items = state["page"], state["items"]
         nb_pages = state["nb_pages"]
         print(f"list: reprise à la page {page} ({len(items)} items en cache)", flush=True)
@@ -233,7 +233,7 @@ def main() -> int:
                 encoding="utf-8",
             )
             print(f"list page {page}/{nb_pages} (items cumulés {len(items)}, nbResultats {pagination.get('nbResultats')})", flush=True)
-            if page + 1 >= nb_pages:
+            if page >= nb_pages:
                 break
             page += 1
             time.sleep(LIST_DELAY)
